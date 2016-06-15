@@ -1,2 +1,2 @@
-# apex_hpx5_policies
-Repository for holding APEX policies for the HPX5 runtime system.
+# apex_openmp_policy
+APEX OpenMP parallel region policy
