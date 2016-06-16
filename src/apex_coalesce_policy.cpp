@@ -47,8 +47,8 @@ static const std::list<std::string> * coalesce_space = nullptr;
 static apex_policy_handle * custom_event_policy;
 
 static int get_hpx_params(std::shared_ptr<apex_tuning_request> request) {
-    std::shared_ptr<apex_param_enum> parcels_param = std::static_pointer_cast<apex_param_enum>(request->get_param("coalesced_parcels"));
-    const int coalesced_parcels = atoi(parcels_param->get_value().c_str());
+    std::shared_ptr<apex_param_long> parcels_param = std::static_pointer_cast<apex_param_long>(request->get_param("coalesced_parcels"));
+    const int coalesced_parcels = (int)(parcels_param->get_value());
     if(apex_coalesce_policy_verbose) {
         const std::string & name = request->get_name();
         fprintf(stderr, "name: %s, coalesced parcels: %d\n", name.c_str(), coalesced_parcels);
@@ -57,7 +57,9 @@ static int get_hpx_params(std::shared_ptr<apex_tuning_request> request) {
 }
 
 
-void handle_event(const std::string & name, int * tmp) {
+void handle_event(const std::string & name, const apex_context &context) {
+    static apex_tuning_session_handle session;
+    int * tmp = (int*)context.data;
     auto search = apex_coalesce_policy_tuning_requests->find(name);
     if(search == apex_coalesce_policy_tuning_requests->end()) {
         // Start a new tuning session.
@@ -68,18 +70,18 @@ void handle_event(const std::string & name, int * tmp) {
         apex_coalesce_policy_tuning_requests->insert(std::make_pair(name, request));
 
         // Create an event to trigger this tuning session.
-        trigger = apex::register_custom_event(name);
-        request->set_trigger(trigger);
+        //trigger = apex::register_custom_event(name);
+        request->set_trigger(APEX_CUSTOM_EVENT_1); // something bogus?
 
         // Create a metric
         std::function<double(void)> metric = [=]()->double{
             apex_profile * profile = apex::get_profile(name);
             if(profile == nullptr) {
-                std::cerr << "ERROR: no profile for " << name << std::endl;
+                //std::cerr << "ERROR: no profile for " << name << std::endl;
                 return 0.0;
             } 
             if(profile->calls == 0.0) {
-                std::cerr << "ERROR: calls = 0 for " << name << std::endl;
+                //std::cerr << "ERROR: calls = 0 for " << name << std::endl;
                 return 0.0;
             }
             double result = profile->accumulated/profile->calls;
@@ -94,30 +96,26 @@ void handle_event(const std::string & name, int * tmp) {
         request->set_strategy(apex_coalesce_policy_tuning_strategy);
 
         // Create a parameter for number of threads.
-        std::shared_ptr<apex_param_enum> threads_param = request->add_param_enum("coalesced_parcels", "16", *coalesce_space);
+        // std::shared_ptr<apex_param_enum> threads_param = request->add_param_enum("coalesced_parcels", "16", *coalesce_space);
+        std::shared_ptr<apex_param_long> threads_param = request->add_param_long("coalesced_parcels", 256, 4, 2048, 4);
 
         // Set HPX runtime parameters to initial values.
         *tmp = get_hpx_params(request);
 
         // Start the tuning session.
-        apex_tuning_session_handle session = apex::setup_custom_tuning(*request);
+        session = apex::setup_custom_tuning(*request);
     } else {
         // We've seen this region before.
+        //apex_custom_tuning_policy(session, context);
         std::shared_ptr<apex_tuning_request> request = search->second;
         *tmp = get_hpx_params(request);
     }
 }
 
 int policy(const apex_context context) {
-    if(apex_coalesce_policy_verbose) {
-        std::cerr << "In trigger!" << std::endl;
+    if(context.data != nullptr) {
+        handle_event("time per transaction", context);
     }
-    if(context.data == nullptr) {
-        std::cerr << "ERROR: No task_identifier for event!" << std::endl;
-        return APEX_ERROR;
-    }
-    int * tmp = (int*)context.data;
-    handle_event("time per transaction", tmp);
     return APEX_NOERROR;
 }
 
@@ -126,9 +124,11 @@ void print_summary() {
     for(auto request_pair : *apex_coalesce_policy_tuning_requests) {
         auto request = request_pair.second;
         const std::string & name = request->get_name();
-        const std::string & cp = std::static_pointer_cast<apex_param_enum>(request->get_param("coalesced_parcels"))->get_value();
+        std::shared_ptr<apex_param_long> parcels_param = std::static_pointer_cast<apex_param_long>(request->get_param("coalesced_parcels"));
+        const int coalesced_parcels = (int)(parcels_param->get_value());
+        //const std::string & cp = std::static_pointer_cast<apex_param_long>(request->get_param("coalesced_parcels"))->get_value();
         const std::string converged = request->has_converged() ? "CONVERGED" : "NOT CONVERGED";
-        std::cout << "name: " << name << ", coalesced_parcels: " << cp << " " << converged << std::endl;
+        std::cout << "name: " << name << ", coalesced_parcels: " << coalesced_parcels << " " << converged << std::endl;
     }
     std::cout << std::endl;
 }
